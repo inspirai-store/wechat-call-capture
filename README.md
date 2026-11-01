@@ -22,9 +22,23 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 C:\vcpkg\vcpkg.exe install asio:x64-windows spdlog:x64-windows cxxopts:x64-windows
 .\build-native.ps1 -VcpkgRoot C:\vcpkg
+.\install-cloudflared.ps1
 ```
 
 若 PowerShell 执行策略禁止运行脚本，可使用 `powershell -ExecutionPolicy Bypass -File .\build-native.ps1 -VcpkgRoot C:\vcpkg`。构建脚本不会安装 USB/IP 驱动。默认 USB/IP 程序路径为 `C:\Program Files\USBip\usbip.exe`。
+
+`install-cloudflared.ps1` 仅用于手机模式的临时 HTTPS 入口，将官方 cloudflared 下载到本项目的 `tools` 目录并校验 SHA-256；它不安装系统服务。也可自行安装 cloudflared 并将其加入 PATH，或设置 `CLOUDFLARED_PATH`。
+
+## 使用手机摄像头（跨网络原型）
+
+1. 在电脑的助手中将“画面来源”设为“手机 WebRTC”。选择 USB/IP 双路时，先结束其他程序正在使用的本项目双路会话。
+2. 跨网络推荐填写已有 TURN 的地址、用户名和密码，例如 `turn:服务器地址:3478`。密码仅保留在本次程序内存中，并通过 HTTPS 信令发送给手机；不要把凭据填进仓库或聊天。TURN 服务及端口需要从两端网络可访问，部分网络可能仍然无法连接。
+3. 点击“开始采集”，用 iPhone 相机扫描弹出的二维码，在 Safari 打开页面，选择前置或后置镜头并允许摄像头权限。网页只采集视频，不采集声音。保持网页在前台，关闭页面或点击停止会结束手机采集。
+4. 手机画面会显示在电脑预览中，继续通过 `Hi Camara` 和 `Pure Camara` 输出。断线或长时间收不到帧时输出黑画面。连接链接包含临时凭据，仅限本次会话使用，不要公开分享。
+
+默认的临时 HTTPS 入口使用 Cloudflare Quick Tunnel：Cloudflare 会处理网页和信令请求，WebRTC 视频通过直连或配置的 TURN 中继传输。新地址可能需要一段时间生效，程序会检查入口后显示二维码；临时服务不保证可用性，跨网可用性需要在目标手机网络实测。链接通过二维码/复制按钮提供，不写入日志。请仅在信任的网络环境中使用，且仅分享给对应手机。
+
+如已有自己的 HTTPS 根域名/公网 IP 证书和反向代理，可在“自有 HTTPS 入口”填写 `https://你的地址`；程序只在本机 `127.0.0.1:8765` 监听。需要自行将外部 HTTPS 请求安全转发至该端口，例如通过 SSH 反向隧道连接服务器的回环端口，再由 HTTPS 反向代理转发。该地址不能包含路径或查询参数。不要将本机 HTTP 端口直接暴露到公网。
 
 ## 使用
 
@@ -44,6 +58,7 @@ C:\vcpkg\vcpkg.exe install asio:x64-windows spdlog:x64-windows cxxopts:x64-windo
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 .\.venv\Scripts\python.exe tests\gui_fixture.py
 .\.venv\Scripts\python.exe tests\usbip_pair_real_check.py
+.\.venv\Scripts\python.exe tests\phone_dual_real_check.py
 ```
 
 最后一项需要已安装 USB/IP 驱动及 FFmpeg，会临时创建两个独立测试设备并通过 DirectShow 读取。真实微信与直播伴侣的兼容性仍需在目标机器上验证。

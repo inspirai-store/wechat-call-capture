@@ -1,0 +1,16 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #101b18; color: #edf7f0; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(100%, 520px); margin: auto; padding: max(24px, env(safe-area-inset-top)) 22px max(28px, env(safe-area-inset-bottom)); }
+.eyebrow { color: #66d5ac; font-size: 12px; letter-spacing: .16em; font-weight: 700; }
+h1 { margin: 10px 0; font-size: 29px; }
+p { color: #b6cabe; line-height: 1.55; }
+label { display: block; margin: 20px 0 8px; }
+select, button { border-radius: 10px; padding: 13px; font: inherit; }
+select { width: 100%; color: #fff; background: #263a32; border: 1px solid #476052; }
+video { display: block; width: 100%; max-height: 48vh; margin-top: 18px; background: #030806; border-radius: 14px; object-fit: contain; }
+.buttons { display: flex; gap: 10px; }
+button { flex: 1; border: 0; background: #56d8a7; color: #10251c; font-weight: 700; }
+button:last-child { background: #334a3e; color: #fff; }
+button:disabled { opacity: .45; }
+.hint { font-size: 13px; }

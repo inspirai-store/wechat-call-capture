@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>手机摄像头</title>
+  <link rel="stylesheet" href="/phone.css">
+  <script src="/phone.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">PHONE CAMERA</p>
+  <h1>手机摄像头</h1>
+  <p>将手机画面实时发送到电脑。只传输视频，不采集声音。</p>
+  <label for="camera">选择镜头</label>
+  <select id="camera"><option value="user">前置摄像头</option><option value="environment">后置摄像头</option></select>
+  <video id="preview" autoplay muted playsinline></video>
+  <p id="status" role="status">点击开始后，请允许浏览器使用摄像头。</p>
+  <div class="buttons"><button id="start">开始传输</button><button id="stop" disabled>停止</button></div>
+  <p class="hint">保持本页在前台并保持手机屏幕亮起。链接仅限本次连接使用，请勿分享给其他人。</p>
+</main>
+</body>
+</html>

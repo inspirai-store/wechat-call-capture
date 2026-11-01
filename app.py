@@ -66,10 +66,13 @@ def selection_from_drag(start, end, bounds):
 class Session:
     """Runs capture on a worker thread; all UI communication goes through a queue."""
 
-    def __init__(self, mode, width, height, fps, backend=None, *, camera_factory=None, capture_factory=None):
+    def __init__(self, mode, width, height, fps, backend=None, *, camera_factory=None, capture_factory=None,
+                 source_kind='window', phone_ice=None, phone_public_base=None):
         self.mode, self.width, self.height, self.fps, self.backend = mode, width, height, fps, backend
+        self.source_kind, self.phone_ice = source_kind, phone_ice
+        self.phone_public_base = phone_public_base
         self.camera_factory = camera_factory or ({"usbip": UsbipCamera, "usbip_pair": UsbipCameraPair}.get(backend, pyvirtualcam.Camera))
-        self.capture_factory = capture_factory or WindowCapture
+        self.capture_factory = capture_factory
         self.events = queue.Queue()
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -131,8 +134,16 @@ class Session:
                 self.events.put(("device", camera.device))
             if self._stop.is_set():
                 return
-            self.events.put(("status", "请在系统窗口选择器中选择微信通话窗口"))
-            capture = self.capture_factory()
+            if self.capture_factory:
+                capture = self.capture_factory()
+            elif self.source_kind == 'phone':
+                from phone_capture import PhoneCapture
+                self.events.put(('status', '正在启动手机连接服务…'))
+                capture = PhoneCapture(on_event=lambda kind, value: self.events.put((kind, value)),
+                                       ice_servers=self.phone_ice, public_base=self.phone_public_base)
+            else:
+                self.events.put(("status", "请在系统窗口选择器中选择微信通话窗口"))
+                capture = WindowCapture()
             output = np.zeros((self.height, self.width, 3), dtype=np.uint8)
             source = None
             rendered_revision = -1
@@ -154,14 +165,22 @@ class Session:
                     if current_size != source_size:
                         source_size = current_size
                         self.events.put(("source_size", source_size))
-                    if rendered_revision == -1:
+                    if rendered_revision == -1 and not (self.source_kind == 'phone' and current_size == (2, 2)):
                         self.events.put(("status", "正在输出到虚拟摄像头" if camera else "正在预览采集画面"))
                 if not waiting_notice and time.monotonic() - last_frame_time >= 8:
                     waiting_notice = True
+                    if self.source_kind == 'phone' and source is not None:
+                        # Do not keep broadcasting a frozen image after a lost connection.
+                        source = None
+                        output = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                        with self._lock:
+                            self._latest_preview = (make_preview(output), False, None)
                     if source is None:
-                        self.events.put(("status", "尚未收到画面：如已选择窗口，请确认它没有最小化"))
+                        message = "等待手机连接和摄像头画面" if self.source_kind == 'phone' else "尚未收到画面：如已选择窗口，请确认它没有最小化"
+                        self.events.put(("status", message))
                     else:
-                        self.events.put(("status", "画面暂未更新：窗口可能静止或已最小化"))
+                        message = "手机画面暂未更新，请检查手机连接" if self.source_kind == 'phone' else "画面暂未更新：窗口可能静止或已最小化"
+                        self.events.put(("status", message))
                 if source is not None and (frame is not None or revision != rendered_revision):
                     output = fit_frame(crop_frame(source, crop), self.width, self.height, fill=fill, zoom=zoom)
                     if mirror:
@@ -186,7 +205,7 @@ class Session:
             result = "采集窗口已关闭"
         except CaptureError as exc:
             if not self._stop.is_set():
-                result = f"窗口采集失败：{exc}"
+                result = f"{'手机' if self.source_kind == 'phone' else '窗口'}采集失败：{exc}"
         except Exception as exc:
             if not self._stop.is_set():
                 details = str(exc)
@@ -222,8 +241,8 @@ class App:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("微信通话画面助手")
-        self.root.geometry("800x830")
+        self.root.title("视频画面助手 · 手机摄像头")
+        self.root.geometry("800x900")
         self.root.minsize(740, 760)
         self.root.configure(bg=self.BG)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -238,6 +257,13 @@ class App:
         self.resolution = tk.StringVar(value="720 × 1280")
         self.fps = tk.StringVar(value="15")
         self.backend = tk.StringVar(value="USB/IP 双路")
+        self.source = tk.StringVar(value="微信窗口")
+        self.turn_url = tk.StringVar()
+        self.turn_user = tk.StringVar()
+        self.turn_password = tk.StringVar()
+        self.phone_public_base = tk.StringVar()
+        self.phone_url = None
+        self.phone_dialog = None
         self.mirror = tk.BooleanVar(value=False)
         self.fill = tk.BooleanVar(value=True)
         self.zoom = tk.DoubleVar(value=1.0)
@@ -258,9 +284,9 @@ class App:
         top = tk.Frame(outer, bg=self.BG)
         top.pack(fill="x")
         tk.Label(top, text="●", fg=self.GREEN, bg=self.BG, font=("Microsoft YaHei UI", 15)).pack(side="left", padx=(0, 8))
-        tk.Label(top, text="微信通话画面助手", fg=self.INK, bg=self.BG,
+        tk.Label(top, text="视频画面助手", fg=self.INK, bg=self.BG,
                  font=("Microsoft YaHei UI", 19, "bold")).pack(side="left")
-        tk.Label(outer, text="把通话窗口画面发送到虚拟摄像头，或在本机预览。", fg=self.MUTED,
+        tk.Label(outer, text="将窗口或手机摄像头画面发送到摄像头，或在本机预览。", fg=self.MUTED,
                  bg=self.BG, font=("Microsoft YaHei UI", 10)).pack(anchor="w", pady=(5, 18))
 
         card = tk.Frame(outer, bg=self.WHITE, padx=18, pady=15, highlightbackground="#dfe9e3", highlightthickness=1)
@@ -282,6 +308,36 @@ class App:
                      font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
             control = ttk.Combobox(part, textvariable=variable, values=values, width=width,
                                    state="readonly", style="Capture.TCombobox")
+            control.pack(anchor="w")
+            self.controls.append(control)
+
+        https_row = tk.Frame(card, bg=self.WHITE)
+        https_row.pack(fill='x', pady=(8, 0))
+        tk.Label(https_row, text='自有 HTTPS 入口（可选）', fg=self.MUTED, bg=self.WHITE,
+                 font=('Microsoft YaHei UI', 9)).pack(side='left')
+        self.https_entry = ttk.Entry(https_row, textvariable=self.phone_public_base, width=36)
+        self.https_entry.pack(side='left', padx=8)
+        self.controls.append(self.https_entry)
+        tk.Label(https_row, text='留空使用临时入口', fg=self.MUTED, bg=self.WHITE,
+                 font=('Microsoft YaHei UI', 9)).pack(side='left')
+
+        phone_settings = tk.Frame(card, bg=self.WHITE)
+        phone_settings.pack(fill="x", pady=(12, 0))
+        for label, variable, width, show in [
+            ("画面来源", self.source, 13, None),
+            ("TURN 地址（可选）", self.turn_url, 21, ''),
+            ("用户名", self.turn_user, 12, ''),
+            ("密码", self.turn_password, 12, '●'),
+        ]:
+            part = tk.Frame(phone_settings, bg=self.WHITE)
+            part.pack(side="left", padx=(0, 9), anchor="w")
+            tk.Label(part, text=label, fg=self.MUTED, bg=self.WHITE,
+                     font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
+            if show is None:
+                control = ttk.Combobox(part, textvariable=variable, values=("微信窗口", "手机 WebRTC"),
+                                       width=width, state="readonly", style="Capture.TCombobox")
+            else:
+                control = ttk.Entry(part, textvariable=variable, width=width, show=show)
             control.pack(anchor="w")
             self.controls.append(control)
 
@@ -322,6 +378,10 @@ class App:
                                       bg=self.WHITE, fg=self.INK, relief="flat", padx=14, pady=5,
                                       font=("Microsoft YaHei UI", 9), state="disabled")
         self.reset_button.pack(side="left", padx=(8, 0))
+        self.phone_button = tk.Button(selection_bar, text="手机连接二维码", command=self.show_phone_url,
+                                      bg=self.WHITE, fg=self.INK, relief="flat", padx=10, pady=5,
+                                      font=("Microsoft YaHei UI", 9), state="disabled")
+        self.phone_button.pack(side="left", padx=(8, 0))
         self.mirror_button = tk.Checkbutton(selection_bar, text="水平镜像", variable=self.mirror,
                                             command=self.toggle_mirror, bg=self.BG, fg=self.INK,
                                             activebackground=self.BG, selectcolor=self.WHITE,
@@ -355,7 +415,19 @@ class App:
         width, height = (int(v.strip()) for v in self.resolution.get().split("×"))
         backend = {"USB/IP 双路": "usbip_pair", "USB/IP UVC": "usbip", "自动选择": None, "OBS": "obs", "Unity Capture": "unitycapture"}[self.backend.get()]
         mode = "camera" if self.mode.get() == "虚拟摄像头" else "preview"
-        self.session = Session(mode, width, height, int(self.fps.get()), backend)
+        source_kind = 'phone' if self.source.get() == '手机 WebRTC' else 'window'
+        phone_ice = None
+        if source_kind == 'phone' and any((self.turn_url.get(), self.turn_user.get(), self.turn_password.get())):
+            url, username, password = self.turn_url.get().strip(), self.turn_user.get().strip(), self.turn_password.get()
+            if not url.startswith(('turn:', 'turns:')) or not username or not password:
+                self.status.set('请填写有效的 TURN 地址、用户名和密码')
+                self.device.set('例如 turn:服务器地址:3478；凭据仅保存在本次程序内存中')
+                return
+            phone_ice = [{'urls': ['stun:stun.l.google.com:19302']},
+                         {'urls': [url], 'username': username, 'credential': password}]
+        self.session = Session(mode, width, height, int(self.fps.get()), backend,
+                               source_kind=source_kind, phone_ice=phone_ice,
+                               phone_public_base=self.phone_public_base.get().strip() or None)
         self.session.set_mirror(self.mirror.get())
         self.session.set_framing(self.fill.get(), self.zoom.get())
         self.selecting = False
@@ -363,7 +435,7 @@ class App:
         self.drag_start = None
         self.selection_hint.set("默认输出完整窗口")
         self.status.set("正在启动…")
-        self.device.set("请等待系统窗口选择器出现")
+        self.device.set("正在启动手机连接服务" if source_kind == 'phone' else "请等待系统窗口选择器出现")
         self.source_info.set("等待画面 · 不采集声音")
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
@@ -407,6 +479,11 @@ class App:
                         self.status.set(value)
                 elif kind == "device":
                     self.device.set("虚拟摄像头：" + value)
+                elif kind == 'phone_url':
+                    if not self.session._stop.is_set():
+                        self.phone_url = value
+                        self.phone_button.configure(state='normal')
+                        self.show_phone_url()
                 elif kind == "source_size":
                     self.source_info.set(f"源画面 {value[0]} × {value[1]} · 不采集声音")
                 elif kind == "finished":
@@ -421,8 +498,13 @@ class App:
                     self.drag_start = None
                     self.selection_hint.set("默认输出完整窗口")
                     self.source_info.set("等待画面 · 不采集声音")
+                    self.phone_url = None
+                    self.phone_button.configure(state='disabled')
+                    if self.phone_dialog is not None:
+                        self.phone_dialog.destroy()
+                        self.phone_dialog = None
                     for control in self.controls:
-                        control.configure(state="readonly")
+                        control.configure(state="readonly" if isinstance(control, ttk.Combobox) else "normal")
                     self.session = None
                     self.photo = None
                     self._draw_preview()
@@ -472,6 +554,35 @@ class App:
         self.drag_start = None
         self.photo = None
         self._draw_preview()
+
+    def show_phone_url(self):
+        if not self.phone_url:
+            return
+        if self.phone_dialog is not None and self.phone_dialog.winfo_exists():
+            self.phone_dialog.lift()
+            return
+        import qrcode
+        dialog = tk.Toplevel(self.root)
+        self.phone_dialog = dialog
+        dialog.title('手机摄像头连接')
+        dialog.configure(bg=self.BG)
+        dialog.resizable(False, False)
+        tk.Label(dialog, text='用 iPhone 相机扫码，在 Safari 中打开', bg=self.BG, fg=self.INK,
+                 font=('Microsoft YaHei UI', 11, 'bold')).pack(padx=20, pady=(18, 8))
+        qr = qrcode.make(self.phone_url).convert('RGB').resize((250, 250), Image.Resampling.NEAREST)
+        dialog.qr_image = ImageTk.PhotoImage(qr)
+        tk.Label(dialog, image=dialog.qr_image, bg=self.BG).pack(padx=20)
+        tk.Label(dialog, text='链接包含本次连接凭据，请勿分享给他人。', bg=self.BG, fg=self.MUTED,
+                 font=('Microsoft YaHei UI', 9)).pack(pady=(8, 4))
+        def copy_url():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(self.phone_url)
+        tk.Button(dialog, text='复制手机连接链接', command=copy_url, bg=self.WHITE, fg=self.INK,
+                  relief='flat', padx=12, pady=5).pack(pady=(4, 16))
+        def close_dialog():
+            dialog.destroy()
+            self.phone_dialog = None
+        dialog.protocol('WM_DELETE_WINDOW', close_dialog)
 
     def reset_region(self):
         if self.session is None:

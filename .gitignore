@@ -5,3 +5,4 @@ native/target/
 usbip-experiment/build/
 usbip-experiment/usbipdcpp/
 *.log
+tools/
