@@ -77,6 +77,10 @@ class PhoneCapture:
                 raise CaptureError('自有 HTTPS 地址必须是域名根地址，例如 https://camera.example.com。')
             self._public_base = public_base.rstrip('/')
         self._token = secrets.token_urlsafe(24)
+        self._pair_code = f'{secrets.randbelow(100_000_000):08d}'
+        self._pair_expires = 0.0
+        self._pair_failures = 0
+        self._pair_locked_until = 0.0
         self._condition = threading.Condition()
         self._latest = None
         self._sequence = 0
@@ -126,6 +130,7 @@ class PhoneCapture:
             app.router.add_get('/', self._index)
             app.router.add_get('/phone.js', self._javascript)
             app.router.add_get('/api/ice', self._get_ice)
+            app.router.add_post('/api/pair', self._pair)
             app.router.add_post('/api/offer', self._offer)
             app.router.add_post('/api/stop', self._stop_peer)
             app.router.add_get('/phone.css', self._stylesheet)
@@ -151,7 +156,8 @@ class PhoneCapture:
                 ready = await self._wait_public(base)
             else:
                 base = f'http://127.0.0.1:{port}'
-            self._emit('phone_url', f'{base}/#{self._token}')
+            self._pair_expires = time.monotonic() + 600
+            self._emit('phone_pair', {'url': f'{base}/#{self._token}', 'base': base, 'code': self._pair_code})
             self._emit('status', '请用手机打开连接并允许摄像头' if ready else
                        '公网入口未通过电脑网络检查，可用手机尝试或改用自有 HTTPS 入口')
             if self._tunnel:
@@ -245,6 +251,26 @@ class PhoneCapture:
         if not self._authorized(request):
             raise web.HTTPUnauthorized()
         return web.json_response({'iceServers': self._ice}, headers=self._headers())
+
+    async def _pair(self, request):
+        now = time.monotonic()
+        if now < self._pair_locked_until:
+            raise web.HTTPTooManyRequests(text='尝试次数过多，请稍后再试。')
+        if now > self._pair_expires:
+            raise web.HTTPGone(text='房间码已过期，请在电脑上重新开始采集。')
+        try:
+            data = await request.json()
+            code = data.get('code', '')
+        except (ValueError, TypeError, AttributeError):
+            raise web.HTTPBadRequest()
+        if not isinstance(code, str) or not hmac.compare_digest(code.encode('utf-8'), self._pair_code.encode('ascii')):
+            self._pair_failures += 1
+            if self._pair_failures >= 5:
+                self._pair_failures = 0
+                self._pair_locked_until = now + 60
+            raise web.HTTPUnauthorized(text='房间码不正确。')
+        self._pair_failures = 0
+        return web.json_response({'token': self._token}, headers=self._headers())
 
     async def _offer(self, request):
         if not self._authorized(request):

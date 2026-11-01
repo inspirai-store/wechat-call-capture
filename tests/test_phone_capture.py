@@ -26,12 +26,18 @@ class PhoneCaptureTests(unittest.IsolatedAsyncioTestCase):
         capture = PhoneCapture(tunnel=False, ice_servers=[], on_event=lambda *e: events.put(e))
         pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
         try:
-            event, url = await asyncio.to_thread(events.get, True, 5)
-            self.assertEqual(event, 'phone_url')
+            event, pair = await asyncio.to_thread(events.get, True, 5)
+            self.assertEqual(event, 'phone_pair')
+            url = pair['url']
             parts = urlsplit(url)
             base = f'{parts.scheme}://{parts.netloc}'
             headers = {'Authorization': 'Bearer ' + parts.fragment}
             async with aiohttp.ClientSession() as client:
+                async with client.post(base + '/api/pair', json={'code': 'wrong'}) as response:
+                    self.assertEqual(response.status, 401)
+                async with client.post(base + '/api/pair', json={'code': pair['code']}) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual((await response.json())['token'], parts.fragment)
                 async with client.get(base + '/api/ice') as response:
                     self.assertEqual(response.status, 401)
                 async with client.get(base + '/api/ice', headers=headers) as response:
@@ -68,6 +74,24 @@ class PhoneCaptureTests(unittest.IsolatedAsyncioTestCase):
         capture = PhoneCapture(tunnel=False, ice_servers=[])
         await asyncio.to_thread(capture.close)
         self.assertFalse(capture._thread.is_alive())
+
+    async def test_pairing_rate_limit_and_expiry(self):
+        events = Queue()
+        capture = PhoneCapture(tunnel=False, ice_servers=[], on_event=lambda *e: events.put(e))
+        try:
+            _, pair = await asyncio.to_thread(events.get, True, 5)
+            async with aiohttp.ClientSession() as client:
+                for _ in range(5):
+                    async with client.post(pair['base'] + '/api/pair', json={'code': 'incorrect'}) as response:
+                        self.assertEqual(response.status, 401)
+                async with client.post(pair['base'] + '/api/pair', json={'code': pair['code']}) as response:
+                    self.assertEqual(response.status, 429)
+                capture._pair_locked_until = 0
+                capture._pair_expires = 0
+                async with client.post(pair['base'] + '/api/pair', json={'code': pair['code']}) as response:
+                    self.assertEqual(response.status, 410)
+        finally:
+            await asyncio.to_thread(capture.close)
 
 
 if __name__ == '__main__':

@@ -1,13 +1,30 @@
 'use strict';
-const token = location.hash.slice(1);
+let token = location.hash.slice(1);
 history.replaceState(null, '', location.pathname);
 const preview = document.getElementById('preview');
 const status = document.getElementById('status');
 const start = document.getElementById('start');
 const stop = document.getElementById('stop');
 const select = document.getElementById('camera');
+const pairing = document.getElementById('pairing');
+const pairButton = document.getElementById('pair');
+const roomCode = document.getElementById('room-code');
 let peer = null, stream = null, session = null;
-const headers = {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'};
+const headers = () => ({Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'});
+if (!token) { pairing.hidden = false; start.disabled = true; status.textContent = '请输入房间码加入房间。'; }
+pairButton.addEventListener('click', async () => {
+  pairButton.disabled = true;
+  try {
+    const code = roomCode.value.trim();
+    if (!/^\d{8}$/.test(code)) throw new Error('请输入 8 位房间码');
+    const response = await fetch('/api/pair', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code})});
+    if (!response.ok) throw new Error(response.status === 429 ? '尝试次数过多，请稍后再试' : response.status === 410 ? '房间码已过期，请重新开始采集' : '房间码不正确');
+    token = (await response.json()).token;
+    roomCode.value = ''; pairing.hidden = true; start.disabled = false;
+    status.textContent = '已加入房间，点击开始并允许摄像头。';
+  } catch (error) { status.textContent = error.message || '无法加入房间'; }
+  finally { pairButton.disabled = false; }
+});
 
 async function stopCapture() {
   const oldSession = session;
@@ -16,7 +33,7 @@ async function stopCapture() {
   if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
   preview.srcObject = null;
   if (oldSession) {
-    try { await fetch('/api/stop', {method: 'POST', headers, body: JSON.stringify({session: oldSession})}); } catch (_) {}
+    try { await fetch('/api/stop', {method: 'POST', headers: headers(), body: JSON.stringify({session: oldSession})}); } catch (_) {}
   }
   start.disabled = false; select.disabled = false; stop.disabled = true;
 }
@@ -41,7 +58,7 @@ start.addEventListener('click', async () => {
     status.textContent = '等待摄像头授权…';
     stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: select.value}, width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: 30, max: 30}}});
     preview.srcObject = stream;
-    const configResponse = await fetch('/api/ice', {headers, cache: 'no-store'});
+    const configResponse = await fetch('/api/ice', {headers: headers(), cache: 'no-store'});
     if (!configResponse.ok) throw new Error('连接已失效，请重新扫描电脑上的二维码');
     const config = await configResponse.json();
     peer = new RTCPeerConnection(config);
@@ -58,7 +75,7 @@ start.addEventListener('click', async () => {
     status.textContent = '正在连接电脑…';
     await pc.setLocalDescription(await pc.createOffer());
     await waitForIce(pc);
-    const response = await fetch('/api/offer', {method: 'POST', headers, body: JSON.stringify(pc.localDescription)});
+    const response = await fetch('/api/offer', {method: 'POST', headers: headers(), body: JSON.stringify(pc.localDescription)});
     if (!response.ok) throw new Error(response.status === 409 ? '电脑已连接另一台手机' : '电脑拒绝了连接，请重试');
     const answer = await response.json();
     session = answer.session;

@@ -12,6 +12,10 @@
   <p class="eyebrow">PHONE CAMERA</p>
   <h1>手机摄像头</h1>
   <p>将手机画面实时发送到电脑。只传输视频，不采集声音。</p>
+  <div id="pairing" hidden>
+    <label for="room-code">输入电脑上的 8 位房间码</label>
+    <div class="pair-row"><input id="room-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="房间码"><button id="pair">加入房间</button></div>
+  </div>
   <label for="camera">选择镜头</label>
   <select id="camera"><option value="user">前置摄像头</option><option value="environment">后置摄像头</option></select>
   <video id="preview" autoplay muted playsinline></video>

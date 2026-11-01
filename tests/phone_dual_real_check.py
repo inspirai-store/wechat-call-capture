@@ -50,7 +50,8 @@ async def main():
     session.set_framing(True, 1.0)
     session.start()
     try:
-        _, url = await asyncio.to_thread(events.get, True, 10)
+        _, pair = await asyncio.to_thread(events.get, True, 10)
+        url = pair['url']
         parts = urlsplit(url)
         headers = {'Authorization': 'Bearer ' + parts.fragment}
         base = f'{parts.scheme}://{parts.netloc}'

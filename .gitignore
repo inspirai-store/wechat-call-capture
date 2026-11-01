@@ -6,3 +6,4 @@ usbip-experiment/build/
 usbip-experiment/usbipdcpp/
 *.log
 tools/
+.phone-turn.json

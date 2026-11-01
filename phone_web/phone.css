@@ -6,10 +6,13 @@ main { width: min(100%, 520px); margin: auto; padding: max(24px, env(safe-area-i
 h1 { margin: 10px 0; font-size: 29px; }
 p { color: #b6cabe; line-height: 1.55; }
 label { display: block; margin: 20px 0 8px; }
-select, button { border-radius: 10px; padding: 13px; font: inherit; }
+select, button, input { border-radius: 10px; padding: 13px; font: inherit; }
 select { width: 100%; color: #fff; background: #263a32; border: 1px solid #476052; }
 video { display: block; width: 100%; max-height: 48vh; margin-top: 18px; background: #030806; border-radius: 14px; object-fit: contain; }
 .buttons { display: flex; gap: 10px; }
+.pair-row { display: flex; gap: 8px; }
+.pair-row input { min-width: 0; flex: 2; border: 1px solid #476052; background: #263a32; color: #fff; }
+.pair-row button { flex: 1; }
 button { flex: 1; border: 0; background: #56d8a7; color: #10251c; font-weight: 700; }
 button:last-child { background: #334a3e; color: #fff; }
 button:disabled { opacity: .45; }

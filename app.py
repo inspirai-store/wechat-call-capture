@@ -16,6 +16,7 @@ from PIL import Image, ImageTk
 from virtual_camera import fit_frame
 from wechat_capture import CaptureEnded, CaptureError, WindowCapture
 from usbip_camera import UsbipCamera, UsbipCameraPair
+from phone_turn import PROFILE as PHONE_TURN_PROFILE
 
 
 def make_preview(output):
@@ -127,6 +128,12 @@ class Session:
         capture = None
         result = "已停止"
         try:
+            if self.source_kind == 'phone' and self.phone_ice is None and self.capture_factory is None:
+                from phone_turn import configured_ice
+                self.events.put(('status', '正在获取房间的临时中继凭据…'))
+                self.phone_ice = configured_ice()
+            if self._stop.is_set():
+                return
             if self.mode == "camera":
                 self.events.put(("status", "正在连接虚拟摄像头…"))
                 camera = self.camera_factory(width=self.width, height=self.height, fps=self.fps,
@@ -263,6 +270,7 @@ class App:
         self.turn_password = tk.StringVar()
         self.phone_public_base = tk.StringVar()
         self.phone_url = None
+        self.phone_pair = None
         self.phone_dialog = None
         self.mirror = tk.BooleanVar(value=False)
         self.fill = tk.BooleanVar(value=True)
@@ -311,7 +319,22 @@ class App:
             control.pack(anchor="w")
             self.controls.append(control)
 
-        https_row = tk.Frame(card, bg=self.WHITE)
+        source_row = tk.Frame(card, bg=self.WHITE)
+        source_row.pack(fill='x', pady=(10, 0))
+        tk.Label(source_row, text='画面来源', fg=self.MUTED, bg=self.WHITE,
+                 font=('Microsoft YaHei UI', 9)).pack(side='left')
+        source_control = ttk.Combobox(source_row, textvariable=self.source, values=('微信窗口', '手机 WebRTC'),
+                                      width=15, state='readonly', style='Capture.TCombobox')
+        source_control.pack(side='left', padx=8)
+        self.controls.append(source_control)
+        tk.Label(source_row, text='手机配对：自动获取短期中继凭据' if PHONE_TURN_PROFILE.is_file() else '手机配对：可在高级设置配置中继',
+                 fg=self.MUTED, bg=self.WHITE, font=('Microsoft YaHei UI', 9)).pack(side='left', padx=4)
+        tk.Button(source_row, text='高级设置', command=self.toggle_advanced, bg=self.WHITE, fg=self.GREEN,
+                  relief='flat', font=('Microsoft YaHei UI', 9)).pack(side='right')
+
+        self.advanced_frame = tk.Frame(card, bg=self.WHITE)
+        self.advanced_open = False
+        https_row = tk.Frame(self.advanced_frame, bg=self.WHITE)
         https_row.pack(fill='x', pady=(8, 0))
         tk.Label(https_row, text='自有 HTTPS 入口（可选）', fg=self.MUTED, bg=self.WHITE,
                  font=('Microsoft YaHei UI', 9)).pack(side='left')
@@ -321,10 +344,9 @@ class App:
         tk.Label(https_row, text='留空使用临时入口', fg=self.MUTED, bg=self.WHITE,
                  font=('Microsoft YaHei UI', 9)).pack(side='left')
 
-        phone_settings = tk.Frame(card, bg=self.WHITE)
+        phone_settings = tk.Frame(self.advanced_frame, bg=self.WHITE)
         phone_settings.pack(fill="x", pady=(12, 0))
         for label, variable, width, show in [
-            ("画面来源", self.source, 13, None),
             ("TURN 地址（可选）", self.turn_url, 21, ''),
             ("用户名", self.turn_user, 12, ''),
             ("密码", self.turn_password, 12, '●'),
@@ -333,11 +355,7 @@ class App:
             part.pack(side="left", padx=(0, 9), anchor="w")
             tk.Label(part, text=label, fg=self.MUTED, bg=self.WHITE,
                      font=("Microsoft YaHei UI", 9)).pack(anchor="w", pady=(0, 4))
-            if show is None:
-                control = ttk.Combobox(part, textvariable=variable, values=("微信窗口", "手机 WebRTC"),
-                                       width=width, state="readonly", style="Capture.TCombobox")
-            else:
-                control = ttk.Entry(part, textvariable=variable, width=width, show=show)
+            control = ttk.Entry(part, textvariable=variable, width=width, show=show)
             control.pack(anchor="w")
             self.controls.append(control)
 
@@ -409,6 +427,13 @@ class App:
         tk.Label(actions, text="双路：选择 Hi Camara 和 Pure Camara", fg=self.MUTED, bg=self.BG,
                  font=("Microsoft YaHei UI", 9)).pack(side="right")
 
+    def toggle_advanced(self):
+        self.advanced_open = not self.advanced_open
+        if self.advanced_open:
+            self.advanced_frame.pack(fill='x', pady=(6, 0))
+        else:
+            self.advanced_frame.pack_forget()
+
     def start(self):
         if self.session is not None:
             return
@@ -479,9 +504,10 @@ class App:
                         self.status.set(value)
                 elif kind == "device":
                     self.device.set("虚拟摄像头：" + value)
-                elif kind == 'phone_url':
+                elif kind == 'phone_pair':
                     if not self.session._stop.is_set():
-                        self.phone_url = value
+                        self.phone_pair = value
+                        self.phone_url = value['url']
                         self.phone_button.configure(state='normal')
                         self.show_phone_url()
                 elif kind == "source_size":
@@ -499,6 +525,7 @@ class App:
                     self.selection_hint.set("默认输出完整窗口")
                     self.source_info.set("等待画面 · 不采集声音")
                     self.phone_url = None
+                    self.phone_pair = None
                     self.phone_button.configure(state='disabled')
                     if self.phone_dialog is not None:
                         self.phone_dialog.destroy()
@@ -567,17 +594,21 @@ class App:
         dialog.title('手机摄像头连接')
         dialog.configure(bg=self.BG)
         dialog.resizable(False, False)
-        tk.Label(dialog, text='用 iPhone 相机扫码，在 Safari 中打开', bg=self.BG, fg=self.INK,
+        tk.Label(dialog, text='扫码直接配对，或访问地址输入房间码', bg=self.BG, fg=self.INK,
                  font=('Microsoft YaHei UI', 11, 'bold')).pack(padx=20, pady=(18, 8))
         qr = qrcode.make(self.phone_url).convert('RGB').resize((250, 250), Image.Resampling.NEAREST)
         dialog.qr_image = ImageTk.PhotoImage(qr)
         tk.Label(dialog, image=dialog.qr_image, bg=self.BG).pack(padx=20)
-        tk.Label(dialog, text='链接包含本次连接凭据，请勿分享给他人。', bg=self.BG, fg=self.MUTED,
-                 font=('Microsoft YaHei UI', 9)).pack(pady=(8, 4))
+        tk.Label(dialog, text='房间码：' + self.phone_pair['code'], bg=self.BG, fg=self.INK,
+                 font=('Microsoft YaHei UI', 14, 'bold')).pack(pady=(8, 0))
+        tk.Label(dialog, text=self.phone_pair['base'] + '/', bg=self.BG, fg=self.MUTED,
+                 font=('Microsoft YaHei UI', 9), wraplength=350).pack(padx=12, pady=(4, 0))
+        tk.Label(dialog, text='房间码 10 分钟有效。二维码包含配对凭据，请勿公开。', bg=self.BG, fg=self.MUTED,
+                 font=('Microsoft YaHei UI', 9)).pack(pady=(4, 4))
         def copy_url():
             dialog.clipboard_clear()
-            dialog.clipboard_append(self.phone_url)
-        tk.Button(dialog, text='复制手机连接链接', command=copy_url, bg=self.WHITE, fg=self.INK,
+            dialog.clipboard_append(self.phone_pair['base'] + '/')
+        tk.Button(dialog, text='复制房间网页地址', command=copy_url, bg=self.WHITE, fg=self.INK,
                   relief='flat', padx=12, pady=5).pack(pady=(4, 16))
         def close_dialog():
             dialog.destroy()
