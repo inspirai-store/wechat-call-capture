@@ -346,7 +346,7 @@ class App:
         self.stop_button = tk.Button(actions, text="停止", command=self.stop, bg="#e3ebe6", fg=self.INK,
                                      relief="flat", font=("Microsoft YaHei UI", 10), padx=23, pady=8, state="disabled")
         self.stop_button.pack(side="left", padx=(10, 0))
-        tk.Label(actions, text="双路：选择 WeChat USBIP UVC 和 UVC 2", fg=self.MUTED, bg=self.BG,
+        tk.Label(actions, text="双路：选择 Hi Camara 和 Pure Camara", fg=self.MUTED, bg=self.BG,
                  font=("Microsoft YaHei UI", 9)).pack(side="right")
 
     def start(self):

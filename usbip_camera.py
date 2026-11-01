@@ -17,11 +17,10 @@ _SERVER = _ROOT / 'usbip-experiment' / 'build' / 'Release' / 'wechat_uvc_pair.ex
 _USBIP = Path(r'C:\Program Files\USBip\usbip.exe')
 _CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
-# Keep the original first device's identity for existing consumers. The second
-# has its own bus, PID and ports so Windows exposes it as a separate camera.
+# Each device uses its own bus, PID and ports so Windows exposes it separately.
 CAMERA_PROFILES = (
-    (53241, 53242, '1-2', 'WeChat USBIP UVC', 0x5682),
-    (53243, 53244, '1-3', 'WeChat USBIP UVC 2', 0x5683),
+    (53241, 53242, '1-2', 'Hi Camara', 0x5684),
+    (53243, 53244, '1-3', 'Pure Camara', 0x5685),
 )
 
 
@@ -165,7 +164,7 @@ class UsbipCameraPair:
     def __init__(self, width, height, fps, *, profiles=CAMERA_PROFILES, camera_factory=UsbipCamera, **kwargs):
         self._cameras = []
         self._last_frame = None
-        self.device = 'WeChat USBIP UVC / WeChat USBIP UVC 2'
+        self.device = 'Hi Camara / Pure Camara'
         try:
             for profile in profiles:
                 self._cameras.append(camera_factory(width=width, height=height, fps=fps, profile=profile, **kwargs))

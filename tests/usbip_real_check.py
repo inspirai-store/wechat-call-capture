@@ -47,7 +47,7 @@ def verify():
             raise RuntimeError('Timed out waiting for capture frame')
         time.sleep(.3)
         result = subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-f','dshow',
-            '-video_size','720x1280','-framerate','15','-i','video=WeChat USBIP UVC',
+            '-video_size','720x1280','-framerate','15','-i','video=Hi Camara',
             '-frames:v','3','-pix_fmt','bgr24','-f','rawvideo','pipe:1'],
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=25)
         if result.returncode or len(result.stdout) < 720 * 1280 * 3:
