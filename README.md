@@ -22,12 +22,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 C:\vcpkg\vcpkg.exe install asio:x64-windows spdlog:x64-windows cxxopts:x64-windows
 .\build-native.ps1 -VcpkgRoot C:\vcpkg
-.\install-cloudflared.ps1
 ```
 
 若 PowerShell 执行策略禁止运行脚本，可使用 `powershell -ExecutionPolicy Bypass -File .\build-native.ps1 -VcpkgRoot C:\vcpkg`。构建脚本不会安装 USB/IP 驱动。默认 USB/IP 程序路径为 `C:\Program Files\USBip\usbip.exe`。
 
-`install-cloudflared.ps1` 仅用于手机模式的临时 HTTPS 入口，将官方 cloudflared 下载到本项目的 `tools` 目录并校验 SHA-256；它不安装系统服务。也可自行安装 cloudflared 并将其加入 PATH，或设置 `CLOUDFLARED_PATH`。
+使用临时 HTTPS 入口时另运行 `./install-cloudflared.ps1`，它将官方 cloudflared 下载到本项目的 `tools` 目录并校验 SHA-256，不安装系统服务。固定入口不需要 cloudflared。
 
 ## 使用手机摄像头（跨网络原型）
 
@@ -36,11 +35,11 @@ C:\vcpkg\vcpkg.exe install asio:x64-windows spdlog:x64-windows cxxopts:x64-windo
 3. 点击“开始采集”，用 iPhone 相机扫码直接配对，或将房间网页地址发给手机、手动输入 8 位房间码。在 Safari 选择前置或后置镜头并允许摄像头权限。网页只采集视频，不采集声音。保持网页在前台，关闭页面或点击停止会结束手机采集。
 4. 手机画面会显示在电脑预览中，继续通过 `Hi Camara` 和 `Pure Camara` 输出。断线或长时间收不到帧时输出黑画面。房间码 10 分钟有效、连续输错会暂时锁定；二维码包含本次会话凭据，不能公开分享。
 
-短期凭据签发器通过本机 SSH 免密连接获取 12 小时有效的临时凭据。使用此方式需在电脑项目目录创建不纳入 Git 的 `.phone-turn.json`，内容形如 `{"issuer_ssh":"root@服务器地址"}`，并预先验证服务器 SSH 主机密钥及免密登录。`server/install_ephemeral_turn.py` 可由服务器管理员安装独立 coturn 实例与签发器，默认监听 TCP/UDP 3479，使用 UDP 49224–49287 作为中继端口；这些端口需要在云安全组与主机防火墙开放。它不会覆盖已有的 coturn 服务。长时间会话需要在临时凭据到期前重新开始采集。服务器签名密钥不发送给手机，短期凭据会发送给已配对的手机以建立 WebRTC 连接。
+短期凭据签发器通过本机 SSH 免密连接获取 12 小时有效的临时凭据。使用此方式需在电脑项目目录创建不纳入 Git 的 `.phone-turn.json`，内容形如 `{"issuer_ssh":"root@服务器地址","public_base":"https://服务器地址"}`，并预先验证服务器 SSH 主机密钥及免密登录。`public_base` 可选；配置后程序自动通过 SSH 反向隧道连接服务器的回环端口 18765，固定 HTTPS 页面即使电脑离线也可打开，房间功能则需要电脑启动采集。`server/install_ephemeral_turn.py` 可由服务器管理员安装独立 coturn 实例与签发器，默认监听 TCP/UDP 3479，使用 UDP 49224–49287 作为中继端口；这些端口需要在云安全组与主机防火墙开放。它不会覆盖已有的 coturn 服务。长时间会话需要在临时凭据到期前重新开始采集。服务器签名密钥不发送给手机，短期凭据会发送给已配对的手机以建立 WebRTC 连接。
 
 服务器需预先安装 coturn、Python 3 和 systemd，并具备 `coturn` 系统账户。首次部署可在服务器上以 root 执行 `python3 install_ephemeral_turn.py 公网IPv4`；脚本拒绝覆盖同名服务或配置，并在启动失败时回滚自身创建的文件。仅向可信的配对对象提供房间码：持有者可在有效期内取得临时中继凭据。
 
-默认的临时 HTTPS 入口使用 Cloudflare Quick Tunnel：Cloudflare 会处理网页和信令请求，WebRTC 视频通过直连或配置的 TURN 中继传输。新地址可能需要一段时间生效，程序会检查入口后显示二维码；临时服务不保证可用性，跨网可用性需要在目标手机网络实测。链接通过二维码/复制按钮提供，不写入日志。请仅在信任的网络环境中使用，且仅分享给对应手机。
+未配置固定地址时使用 Cloudflare Quick Tunnel：Cloudflare 会处理网页和信令请求，WebRTC 视频通过直连或配置的 TURN 中继传输。新地址可能需要一段时间生效，程序会检查入口后显示二维码；临时服务不保证可用性，跨网可用性需要在目标手机网络实测。链接通过二维码/复制按钮提供，不写入日志。请仅在信任的网络环境中使用，且仅分享给对应手机。
 
 如已有自己的 HTTPS 根域名/公网 IP 证书和反向代理，可在“自有 HTTPS 入口”填写 `https://你的地址`；程序只在本机 `127.0.0.1:8765` 监听。需要自行将外部 HTTPS 请求安全转发至该端口，例如通过 SSH 反向隧道连接服务器的回环端口，再由 HTTPS 反向代理转发。该地址不能包含路径或查询参数。不要将本机 HTTP 端口直接暴露到公网。
 

@@ -40,6 +40,10 @@ class PhoneCaptureTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((await response.json())['token'], parts.fragment)
                 async with client.get(base + '/api/ice') as response:
                     self.assertEqual(response.status, 401)
+                async with client.get(base + '/api/health') as response:
+                    self.assertEqual(response.status, 401)
+                async with client.get(base + '/api/health', headers=headers) as response:
+                    self.assertEqual(response.status, 204)
                 async with client.get(base + '/api/ice', headers=headers) as response:
                     self.assertEqual(response.status, 200)
                     self.assertEqual((await response.json())['iceServers'], [])

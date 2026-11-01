@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from phone_turn import configured_ice
+from phone_turn import configured_ice, load_profile
 from wechat_capture import CaptureError
 
 
@@ -14,6 +14,12 @@ class TurnIssuerTests(unittest.TestCase):
     def test_missing_profile_uses_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(configured_ice(Path(tmp) / 'missing.json'))
+
+    def test_profile_can_supply_fixed_public_endpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / 'profile.json'
+            profile.write_text(json.dumps({'issuer_ssh': 'user@example.com', 'public_base': 'https://example.com'}), encoding='utf-8')
+            self.assertEqual(load_profile(profile)['public_base'], 'https://example.com')
 
     def test_issuer_supplies_ephemeral_credentials_without_shell(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -18,7 +18,7 @@ pairButton.addEventListener('click', async () => {
     const code = roomCode.value.trim();
     if (!/^\d{8}$/.test(code)) throw new Error('请输入 8 位房间码');
     const response = await fetch('/api/pair', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code})});
-    if (!response.ok) throw new Error(response.status === 429 ? '尝试次数过多，请稍后再试' : response.status === 410 ? '房间码已过期，请重新开始采集' : '房间码不正确');
+    if (!response.ok) throw new Error(response.status >= 500 ? '电脑房间未启动或连接已断开' : response.status === 429 ? '尝试次数过多，请稍后再试' : response.status === 410 ? '房间码已过期，请重新开始采集' : '房间码不正确');
     token = (await response.json()).token;
     roomCode.value = ''; pairing.hidden = true; start.disabled = false;
     status.textContent = '已加入房间，点击开始并允许摄像头。';

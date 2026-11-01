@@ -128,10 +128,17 @@ class Session:
         capture = None
         result = "已停止"
         try:
-            if self.source_kind == 'phone' and self.phone_ice is None and self.capture_factory is None:
-                from phone_turn import configured_ice
-                self.events.put(('status', '正在获取房间的临时中继凭据…'))
-                self.phone_ice = configured_ice()
+            reverse_ssh = None
+            if self.source_kind == 'phone' and self.capture_factory is None:
+                from phone_turn import configured_ice, load_profile
+                profile = load_profile()
+                if self.phone_ice is None:
+                    self.events.put(('status', '正在获取房间的临时中继凭据…'))
+                    self.phone_ice = configured_ice()
+                if profile and not self.phone_public_base:
+                    self.phone_public_base = profile.get('public_base')
+                if profile and self.phone_public_base and self.phone_public_base.rstrip('/') == str(profile.get('public_base', '')).rstrip('/'):
+                    reverse_ssh = profile['issuer_ssh']
             if self._stop.is_set():
                 return
             if self.mode == "camera":
@@ -147,7 +154,8 @@ class Session:
                 from phone_capture import PhoneCapture
                 self.events.put(('status', '正在启动手机连接服务…'))
                 capture = PhoneCapture(on_event=lambda kind, value: self.events.put((kind, value)),
-                                       ice_servers=self.phone_ice, public_base=self.phone_public_base)
+                                       ice_servers=self.phone_ice, public_base=self.phone_public_base,
+                                       reverse_ssh=reverse_ssh)
             else:
                 self.events.put(("status", "请在系统窗口选择器中选择微信通话窗口"))
                 capture = WindowCapture()
@@ -277,7 +285,7 @@ class App:
         self.zoom = tk.DoubleVar(value=1.0)
         self.resolution.trace_add("write", self._resolution_changed)
         self.status = tk.StringVar(value="准备就绪")
-        self.device = tk.StringVar(value="启动后选择微信的视频通话窗口")
+        self.device = tk.StringVar(value="启动后选择画面来源")
         self.source_info = tk.StringVar(value="等待画面 · 不采集声音")
         self._build()
         self.root.after(50, self._poll)
@@ -341,7 +349,7 @@ class App:
         self.https_entry = ttk.Entry(https_row, textvariable=self.phone_public_base, width=36)
         self.https_entry.pack(side='left', padx=8)
         self.controls.append(self.https_entry)
-        tk.Label(https_row, text='留空使用临时入口', fg=self.MUTED, bg=self.WHITE,
+        tk.Label(https_row, text='留空使用默认入口', fg=self.MUTED, bg=self.WHITE,
                  font=('Microsoft YaHei UI', 9)).pack(side='left')
 
         phone_settings = tk.Frame(self.advanced_frame, bg=self.WHITE)
@@ -556,7 +564,7 @@ class App:
         width, height = canvas.winfo_width(), canvas.winfo_height()
         canvas.delete("image", "placeholder", "selection")
         if self.photo is None:
-            canvas.create_text(width / 2, height / 2, text="启动后选择通话窗口\n画面将在这里显示",
+            canvas.create_text(width / 2, height / 2, text="启动采集后\n画面将在这里显示",
                                fill="#a4bdb2", font=("Microsoft YaHei UI", 11), justify="center", tags="placeholder")
         else:
             canvas.create_image(width / 2, height / 2, image=self.photo, tags="image")

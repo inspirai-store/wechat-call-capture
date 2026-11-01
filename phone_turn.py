@@ -13,7 +13,7 @@ PROFILE = Path(__file__).resolve().parent / '.phone-turn.json'
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
-def configured_ice(profile=PROFILE):
+def load_profile(profile=PROFILE):
     if not profile.is_file():
         return None
     try:
@@ -23,6 +23,14 @@ def configured_ice(profile=PROFILE):
             raise ValueError('bad target')
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise CaptureError('手机 TURN 配置无效，请检查本机配对配置。') from exc
+    return config
+
+
+def configured_ice(profile=PROFILE):
+    config = load_profile(profile)
+    if not config:
+        return None
+    target = config['issuer_ssh']
     try:
         result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
             '-o', 'ConnectTimeout=8', target, '/usr/local/libexec/phone-camera-turn-credentials'],

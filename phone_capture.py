@@ -66,11 +66,12 @@ def cloudflared_path():
 
 class PhoneCapture:
     """Thread-safe latest-frame interface matching WindowCapture."""
-    def __init__(self, *, on_event=None, tunnel=True, ice_servers=None, public_base=None):
+    def __init__(self, *, on_event=None, tunnel=True, ice_servers=None, public_base=None, reverse_ssh=None):
         self._on_event = on_event or (lambda *_: None)
         self._ice = ice_servers if ice_servers is not None else ice_config()
         self._tunnel_enabled = tunnel
         self._public_base = public_base
+        self._reverse_ssh = reverse_ssh
         if public_base:
             parsed = urlsplit(public_base)
             if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment:
@@ -91,6 +92,7 @@ class PhoneCapture:
         self._task = None
         self._runner = None
         self._tunnel = None
+        self._ssh_tunnel = None
         self._peer = None
         self._peer_id = None
         self._track_task = None
@@ -130,18 +132,29 @@ class PhoneCapture:
             app.router.add_get('/', self._index)
             app.router.add_get('/phone.js', self._javascript)
             app.router.add_get('/api/ice', self._get_ice)
+            app.router.add_get('/api/health', self._health)
             app.router.add_post('/api/pair', self._pair)
             app.router.add_post('/api/offer', self._offer)
             app.router.add_post('/api/stop', self._stop_peer)
             app.router.add_get('/phone.css', self._stylesheet)
             self._runner = web.AppRunner(app, access_log=None, shutdown_timeout=2)
             await self._runner.setup()
-            site = web.TCPSite(self._runner, '127.0.0.1', 8765 if self._public_base else 0)
+            site = web.TCPSite(self._runner, '127.0.0.1', 8765 if self._public_base and not self._reverse_ssh else 0)
             await site.start()
             port = site._server.sockets[0].getsockname()[1]
             ready = True
             if self._public_base:
                 base = self._public_base
+                if self._reverse_ssh:
+                    self._emit('status', '正在连接固定房间服务…')
+                    self._ssh_tunnel = await asyncio.create_subprocess_exec(
+                        'ssh', '-N', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+                        '-o', 'ExitOnForwardFailure=yes', '-o', 'ConnectTimeout=8',
+                        '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+                        '-R', f'127.0.0.1:18765:127.0.0.1:{port}', self._reverse_ssh,
+                        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                    await self._wait_fixed(base)
             elif self._tunnel_enabled:
                 executable = cloudflared_path()
                 if not executable:
@@ -160,9 +173,10 @@ class PhoneCapture:
             self._emit('phone_pair', {'url': f'{base}/#{self._token}', 'base': base, 'code': self._pair_code})
             self._emit('status', '请用手机打开连接并允许摄像头' if ready else
                        '公网入口未通过电脑网络检查，可用手机尝试或改用自有 HTTPS 入口')
-            if self._tunnel:
-                await self._tunnel.wait()
-                raise RuntimeError('HTTPS 隧道已断开，请停止后重新开始。')
+            active_tunnel = self._tunnel or self._ssh_tunnel
+            if active_tunnel:
+                await active_tunnel.wait()
+                raise RuntimeError('房间连接已断开，请停止后重新开始。')
             await asyncio.Event().wait()
         except asyncio.TimeoutError as exc:
             raise RuntimeError('HTTPS 隧道连接超时，请检查网络或 Cloudflare 连接。') from exc
@@ -171,13 +185,14 @@ class PhoneCapture:
                 await self._drop_peer(self._peer, notify=False)
             if self._runner:
                 await self._runner.cleanup()
-            if self._tunnel and self._tunnel.returncode is None:
-                self._tunnel.terminate()
+            active_tunnel = self._tunnel or self._ssh_tunnel
+            if active_tunnel and active_tunnel.returncode is None:
+                active_tunnel.terminate()
                 try:
-                    await asyncio.wait_for(self._tunnel.wait(), 5)
+                    await asyncio.wait_for(active_tunnel.wait(), 5)
                 except asyncio.TimeoutError:
-                    self._tunnel.kill()
-                    await self._tunnel.wait()
+                    active_tunnel.kill()
+                    await active_tunnel.wait()
 
     async def _tunnel_url(self):
         while True:
@@ -193,6 +208,21 @@ class PhoneCapture:
     async def _drain_tunnel(self):
         while await self._tunnel.stderr.read(4096):
             pass
+
+    async def _wait_fixed(self, base):
+        deadline = time.monotonic() + 20
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as client:
+            while time.monotonic() < deadline:
+                if self._ssh_tunnel.returncode is not None:
+                    raise RuntimeError('固定房间连接失败：请检查 SSH 及端口是否被占用。')
+                try:
+                    async with client.get(base + '/api/health', headers={'Authorization': 'Bearer ' + self._token}) as response:
+                        if response.status == 204:
+                            return
+                except (OSError, asyncio.TimeoutError, aiohttp.ClientError):
+                    pass
+                await asyncio.sleep(.5)
+        raise RuntimeError('固定房间入口未就绪，请检查服务器连接及 HTTPS 配置。')
 
     async def _wait_public(self, base):
         """Avoid presenting a new quick-tunnel URL before DNS and HTTPS are ready."""
@@ -251,6 +281,11 @@ class PhoneCapture:
         if not self._authorized(request):
             raise web.HTTPUnauthorized()
         return web.json_response({'iceServers': self._ice}, headers=self._headers())
+
+    async def _health(self, request):
+        if not self._authorized(request):
+            raise web.HTTPUnauthorized()
+        return web.Response(status=204, headers=self._headers())
 
     async def _pair(self, request):
         now = time.monotonic()
