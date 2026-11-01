@@ -1,0 +1,27 @@
+diff --git a/examples/CMakeLists.txt b/examples/CMakeLists.txt
+index 05bd29d..4e7e828 100644
+--- a/examples/CMakeLists.txt
++++ b/examples/CMakeLists.txt
+@@ -27,6 +27,9 @@ if (cxxopts_FOUND)
+     if (USBIPDCPP_BUILD_VIRTUAL_DEVICE AND USBIPDCPP_BUILD_EXAMPLE_MOCK_MSC)
+         add_subdirectory(mock_msc)
+     endif ()
++    if (USBIPDCPP_BUILD_VIRTUAL_DEVICE)
++        add_subdirectory(wechat_uvc)
++    endif ()
+     if (USBIPDCPP_BUILD_VIRTUAL_DEVICE AND USBIPDCPP_BUILD_EXAMPLE_MOCK_UVC)
+         add_subdirectory(mock_uvc)
+     endif ()
+diff --git a/include/usbipdcpp/utils/utils.h b/include/usbipdcpp/utils/utils.h
+index 8888416..a3475ac 100644
+--- a/include/usbipdcpp/utils/utils.h
++++ b/include/usbipdcpp/utils/utils.h
+@@ -30,7 +30,7 @@ inline void if_has_value_than_rethrow(std::exception_ptr e) {
+  * @brief 判断当前平台是否为小端（编译期已知时 consteval，否则运行时探测）
+  */
+ constexpr bool is_little_endian() {
+-    if consteval {
++    if (std::is_constant_evaluated()) {
+         return std::endian::native == std::endian::little;
+     }
+     else {

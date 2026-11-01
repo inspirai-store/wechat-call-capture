@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+native/target/
+usbip-experiment/build/
+usbip-experiment/usbipdcpp/
+*.log

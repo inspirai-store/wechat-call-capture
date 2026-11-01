@@ -1,0 +1,3 @@
+add_executable(wechat_uvc_pair wechat_uvc_main.cpp LiveSource.cpp)
+target_link_libraries(wechat_uvc_pair usbipdcpp_virtual_device cxxopts::cxxopts)
+target_include_directories(wechat_uvc_pair PRIVATE .)
